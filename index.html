@@ -17,23 +17,28 @@
     body {
       margin: 0;
       font-family: Arial, sans-serif;
-      background: linear-gradient(180deg, var(--bg1), var(--bg2));
-      display: grid;
-      place-items: center;
-      touch-action: none;
-      overscroll-behavior: none;
+      background:
+        radial-gradient(circle at 15% 10%, #ffffff80 0 14%, transparent 30%),
+        radial-gradient(circle at 85% 12%, #ffffff55 0 10%, transparent 26%),
+        linear-gradient(180deg, var(--bg1), var(--bg2));
+      touch-action: manipulation;
+      overscroll-behavior: contain;
+      overflow: auto;
+      padding: max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom));
     }
     .wrap {
-      width: min(96vw, 980px);
+      width: min(98vw, 980px);
+      margin: 0 auto;
       user-select: none;
     }
     canvas {
       width: 100%;
-      height: auto;
-      aspect-ratio: 900 / 520;
+      height: 52vh;
+      max-height: 66vh;
+      min-height: 240px;
       border: 3px solid #3a6ea5;
       border-radius: 10px;
-      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
       display: block;
       background: linear-gradient(180deg, #9ce0ff 0%, #e8f8ff 70%, #f1e6c8 70%, #e8d6aa 100%);
     }
@@ -52,7 +57,9 @@
       gap: 12px;
     }
     .pad, .actions {
-      background: var(--panel);
+      background: linear-gradient(180deg, rgba(31,61,92,0.82), rgba(22,45,72,0.84));
+      border: 1px solid rgba(255,255,255,0.2);
+      box-shadow: 0 8px 18px rgba(11, 30, 56, 0.28);
       border-radius: 10px;
       padding: 10px;
       color: #fff;
@@ -67,13 +74,17 @@
     .btn {
       border: 0;
       border-radius: 10px;
-      background: var(--btn);
+      background: linear-gradient(180deg, #ffffff, #eaf2ff);
       font-size: 16px;
       font-weight: bold;
       min-height: 44px;
       color: #17324d;
+      box-shadow: 0 3px 0 rgba(0,0,0,0.18);
     }
-    .btn:active { background: var(--btn-active); }
+    .btn:active {
+      background: linear-gradient(180deg, #fff2bf, #f1dc89);
+      transform: translateY(1px);
+    }
     .wide {
       width: 100%;
       margin-top: 8px;
@@ -82,6 +93,8 @@
     @media (max-width: 760px) {
       .controls { grid-template-columns: 1fr; }
       .pad-grid { width: 100%; max-width: 240px; }
+      .row { font-size: 12px; flex-direction: column; gap: 4px; }
+      canvas { height: 48vh; max-height: 56vh; }
     }
   </style>
 </head>
@@ -92,7 +105,7 @@
       <div>键盘：↑/空格 跳/飞，←→移动，↓下冲(飞行)，X弹射，M切模式，R重开</div>
       <div>手机：下方虚拟按键</div>
     </div>
-    <div class="controls">
+    <div class="controls" id="controlsPanel">
       <div class="pad">
         <div class="pad-grid">
           <button class="btn" data-key=""></button>
@@ -118,15 +131,27 @@
     const ctx = canvas.getContext("2d");
 
     function resizeCanvas() {
-      const cssW = canvas.clientWidth || BASE_W;
+      const controls = document.getElementById("controlsPanel");
+      const controlsH = controls ? controls.getBoundingClientRect().height : 0;
+      const rowH = document.querySelector(".row")?.getBoundingClientRect().height || 0;
+      const viewportH = window.innerHeight || document.documentElement.clientHeight;
+
+      // 手机端按可视高度动态适配，确保能看到全景，不会只显示一部分
+      const maxCanvasH = Math.max(220, viewportH - controlsH - rowH - 48);
+      const maxCanvasW = canvas.parentElement.clientWidth;
+      const byH = maxCanvasH * (BASE_W / BASE_H);
+      const cssW = Math.max(220, Math.min(maxCanvasW, byH));
       const cssH = cssW * (BASE_H / BASE_W);
+
+      canvas.style.width = cssW + "px";
+      canvas.style.height = cssH + "px";
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       canvas.width = Math.floor(cssW * dpr);
       canvas.height = Math.floor(cssH * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
-    window.addEventListener("resize", resizeCanvas);
-    resizeCanvas();
+    window.addEventListener("resize", () => requestAnimationFrame(resizeCanvas));
+    requestAnimationFrame(resizeCanvas);
 
     const WORLD = { width: BASE_W, height: BASE_H, groundY: BASE_H - 80 };
     const keys = new Set();
