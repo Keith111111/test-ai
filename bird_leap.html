@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>小鸟小场景小游戏</title>
+  <style>
+    :root {
+      --bg1: #8fd3ff;
+      --bg2: #dff4ff;
+      --panel: #1f3d5ccc;
+      --btn: #ffffffcc;
+      --btn-active: #ffef9fcc;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: linear-gradient(180deg, var(--bg1), var(--bg2));
+      display: grid;
+      place-items: center;
+      touch-action: none;
+      overscroll-behavior: none;
+    }
+    .wrap {
+      width: min(96vw, 980px);
+      user-select: none;
+    }
+    canvas {
+      width: 100%;
+      height: auto;
+      aspect-ratio: 900 / 520;
+      border: 3px solid #3a6ea5;
+      border-radius: 10px;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+      display: block;
+      background: linear-gradient(180deg, #9ce0ff 0%, #e8f8ff 70%, #f1e6c8 70%, #e8d6aa 100%);
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 10px;
+      color: #16324a;
+      font-size: 13px;
+    }
+    .controls {
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .pad, .actions {
+      background: var(--panel);
+      border-radius: 10px;
+      padding: 10px;
+      color: #fff;
+    }
+    .pad-grid {
+      width: 180px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+    .btn {
+      border: 0;
+      border-radius: 10px;
+      background: var(--btn);
+      font-size: 16px;
+      font-weight: bold;
+      min-height: 44px;
+      color: #17324d;
+    }
+    .btn:active { background: var(--btn-active); }
+    .wide {
+      width: 100%;
+      margin-top: 8px;
+    }
+    .actions .btn + .btn { margin-top: 8px; }
+    @media (max-width: 760px) {
+      .controls { grid-template-columns: 1fr; }
+      .pad-grid { width: 100%; max-width: 240px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <canvas id="game"></canvas>
+    <div class="row">
+      <div>键盘：↑/空格 跳/飞，←→移动，↓下冲(飞行)，X弹射，M切模式，R重开</div>
+      <div>手机：下方虚拟按键</div>
+    </div>
+    <div class="controls">
+      <div class="pad">
+        <div class="pad-grid">
+          <button class="btn" data-key=""></button>
+          <button class="btn" data-key="ArrowUp">↑</button>
+          <button class="btn" data-key=""></button>
+          <button class="btn" data-key="ArrowLeft">←</button>
+          <button class="btn" data-key="ArrowDown">↓</button>
+          <button class="btn" data-key="ArrowRight">→</button>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn wide" id="modeBtn">模式：跑酷</button>
+        <button class="btn wide" id="dashBtn">弹射冲刺</button>
+        <button class="btn wide" id="resetBtn">复原 / 重开</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const BASE_W = 900;
+    const BASE_H = 520;
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+
+    function resizeCanvas() {
+      const cssW = canvas.clientWidth || BASE_W;
+      const cssH = cssW * (BASE_H / BASE_W);
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      canvas.width = Math.floor(cssW * dpr);
+      canvas.height = Math.floor(cssH * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    window.addEventListener("resize", resizeCanvas);
+    resizeCanvas();
+
+    const WORLD = { width: BASE_W, height: BASE_H, groundY: BASE_H - 80 };
+    const keys = new Set();
+    const pipes = [];
+    const groundBlocks = [];
+    const stars = [];
+
+    const MODE = { RUN: "run", FLY: "fly" };
+    let mode = MODE.RUN;
+    let score = 0;
+    let gameOver = false;
+    let frame = 0;
+    let speed = 3.1;
+    let jumpCount = 0;
+    let dashCooldown = 0;
+    let dashBypassLeft = 0;
+    let dashObstacleCount = 0;
+    let dashSessionId = 0;
+    let bgTheme = null;
+
+    const BG_THEMES = [
+      {
+        name: "青山晓雾",
+        skyTop: "#7ec8ff",
+        skyBottom: "#eef8ff",
+        sun: "#ffe39a",
+        mountainFar: "rgba(136,177,165,0.45)",
+        mountainNear: "rgba(94,151,128,0.58)",
+        ground: "#d8bf92",
+        groundStripe: "rgba(152,108,69,0.35)",
+        deco: "#2f5f4f"
+      },
+      {
+        name: "落霞秋山",
+        skyTop: "#ffb47a",
+        skyBottom: "#ffe8cc",
+        sun: "#ffd1a6",
+        mountainFar: "rgba(186,132,102,0.42)",
+        mountainNear: "rgba(148,92,68,0.55)",
+        ground: "#c8a27c",
+        groundStripe: "rgba(110,72,52,0.34)",
+        deco: "#5a3626"
+      },
+      {
+        name: "月下江南",
+        skyTop: "#7f8ed8",
+        skyBottom: "#d9e0ff",
+        sun: "#f5f0d7",
+        mountainFar: "rgba(109,121,167,0.42)",
+        mountainNear: "rgba(79,98,143,0.58)",
+        ground: "#b7a7a2",
+        groundStripe: "rgba(91,82,85,0.33)",
+        deco: "#2d3358"
+      }
+    ];
+
+    const bird = {
+      x: 170,
+      y: 220,
+      w: 34,
+      h: 26,
+      vx: 0,
+      vy: 0,
+      gravityFly: 0.38,
+      gravityRun: 0.55,
+      flapPower: -6.8,
+      jumpPower: -8.4,
+      maxFall: 9
+    };
+
+    function rand(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    function rectHit(a, b) {
+      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
+    function reset() {
+      pipes.length = 0;
+      groundBlocks.length = 0;
+      stars.length = 0;
+      bird.x = 170;
+      bird.y = mode === MODE.RUN ? WORLD.groundY - bird.h : 220;
+      bird.vx = 0;
+      bird.vy = 0;
+      score = 0;
+      frame = 0;
+      speed = 3.1;
+      jumpCount = 0;
+      dashCooldown = 0;
+      dashBypassLeft = 0;
+      dashObstacleCount = 0;
+      dashSessionId = 0;
+      gameOver = false;
+      bgTheme = BG_THEMES[Math.floor(Math.random() * BG_THEMES.length)];
+      spawnStar();
+      if (mode === MODE.FLY) spawnPipe();
+      else spawnBlock();
+    }
+
+    function setMode(next) {
+      mode = next;
+      document.getElementById("modeBtn").textContent = "模式：" + (mode === MODE.FLY ? "飞行" : "跑酷");
+      reset();
+    }
+
+    function spawnPipe() {
+      const gap = rand(145, 190);
+      const topH = rand(60, WORLD.groundY - gap - 60);
+      pipes.push({ x: WORLD.width + 20, w: 70, topH, gap, passed: false });
+    }
+
+    function spawnBlock() {
+      const h = rand(22, 46);
+      const w = rand(34, 58);
+      groundBlocks.push({ x: WORLD.width + 20, y: WORLD.groundY - h, w, h, passed: false });
+    }
+
+    function spawnStar() {
+      stars.push({
+        x: WORLD.width + rand(120, 320),
+        y: rand(80, WORLD.groundY - 110),
+        r: 10,
+        got: false
+      });
+    }
+
+    function drawBird() {
+      ctx.save();
+      const angle = mode === MODE.FLY
+        ? Math.max(-0.5, Math.min(0.7, bird.vy * 0.08))
+        : Math.max(-0.2, Math.min(0.2, bird.vx * 0.05));
+      ctx.translate(bird.x + bird.w / 2, bird.y + bird.h / 2);
+      ctx.rotate(angle);
+      ctx.fillStyle = "#ffda47";
+      ctx.fillRect(-bird.w / 2, -bird.h / 2, bird.w, bird.h);
+      ctx.fillStyle = "#f29900";
+      ctx.fillRect(bird.w / 2 - 4, -4, 10, 8);
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(3, -9, 8, 8);
+      ctx.fillStyle = "#222";
+      ctx.fillRect(7, -6, 3, 3);
+      if (dashBypassLeft > 0) {
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-bird.w / 2 - 3, -bird.h / 2 - 3, bird.w + 6, bird.h + 6);
+      }
+      ctx.restore();
+    }
+
+    function drawPipe(p) {
+      ctx.fillStyle = "#3ba55d";
+      ctx.fillRect(p.x, 0, p.w, p.topH);
+      ctx.fillRect(p.x, p.topH + p.gap, p.w, WORLD.groundY - (p.topH + p.gap));
+      ctx.fillStyle = "#2f8e4f";
+      ctx.fillRect(p.x - 5, p.topH - 12, p.w + 10, 12);
+      ctx.fillRect(p.x - 5, p.topH + p.gap, p.w + 10, 12);
+    }
+
+    function drawBlock(b) {
+      ctx.fillStyle = "#7b4f2e";
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+      ctx.fillStyle = "#9c6941";
+      ctx.fillRect(b.x + 4, b.y + 4, b.w - 8, b.h - 8);
+    }
+
+    function drawStar(s) {
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.fillStyle = "#ffd54a";
+      for (let i = 0; i < 5; i++) {
+        ctx.rotate((Math.PI * 2) / 5);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(5, 12);
+        ctx.lineTo(-5, 12);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    function doActionUp() {
+      if (gameOver) return;
+      if (mode === MODE.FLY) {
+        bird.vy = bird.flapPower;
+      } else {
+        const onGround = bird.y + bird.h >= WORLD.groundY - 0.1;
+        if (onGround) jumpCount = 0;
+        if (jumpCount < 2) {
+          bird.vy = bird.jumpPower;
+          jumpCount++;
+        }
+      }
+    }
+
+    function triggerDash() {
+      if (gameOver || dashCooldown > 0) return;
+      dashCooldown = 520;
+      dashBypassLeft = 50;
+      dashSessionId++;
+      bird.vx = 12.8;
+      if (mode === MODE.FLY) bird.vy = -1.2;
+    }
+
+    function updatePlayer() {
+      if (keys.has("ArrowLeft")) bird.vx = -3.4;
+      else if (keys.has("ArrowRight")) bird.vx = 3.4;
+      else bird.vx *= 0.72;
+
+      bird.x += bird.vx;
+      bird.x = Math.max(16, Math.min(WORLD.width - bird.w - 16, bird.x));
+
+      if (mode === MODE.FLY && keys.has("ArrowDown") && dashBypassLeft <= 0) bird.vy += 0.65;
+
+      if (mode === MODE.FLY && dashBypassLeft > 0) {
+        // 经典模式弹射期间悬浮，不下落。
+        bird.vy = 0;
+      } else {
+        bird.vy += mode === MODE.FLY ? bird.gravityFly : bird.gravityRun;
+        bird.vy = Math.min(bird.maxFall, bird.vy);
+        bird.y += bird.vy;
+      }
+
+      if (bird.y < 0) {
+        bird.y = 0;
+        bird.vy = 0;
+      }
+
+      if (bird.y + bird.h >= WORLD.groundY) {
+        bird.y = WORLD.groundY - bird.h;
+        bird.vy = 0;
+        jumpCount = 0;
+        if (mode === MODE.FLY) gameOver = true;
+      }
+    }
+
+    function updateObstacles() {
+      frame++;
+      speed = Math.min(5.6, 3.1 + score * 0.03);
+      if (dashCooldown > 0) dashCooldown--;
+      const sceneSpeed = dashBypassLeft > 0 ? speed * 5 : speed;
+
+      if (mode === MODE.FLY && frame % 108 === 0) spawnPipe();
+      if (mode === MODE.RUN && frame % 96 === 0) spawnBlock();
+      if (frame % 140 === 0) spawnStar();
+
+      const birdRect = { x: bird.x, y: bird.y, w: bird.w, h: bird.h };
+
+      for (const p of pipes) {
+        p.x -= sceneSpeed;
+        if (!p.passed && p.x + p.w < bird.x) {
+          p.passed = true;
+          score++;
+        }
+        const topRect = { x: p.x, y: 0, w: p.w, h: p.topH };
+        const botRect = { x: p.x, y: p.topH + p.gap, w: p.w, h: WORLD.groundY - (p.topH + p.gap) };
+        if (rectHit(birdRect, topRect) || rectHit(birdRect, botRect)) {
+          if (dashBypassLeft > 0) {
+            if (p.dashSessionId !== dashSessionId) {
+              p.dashSessionId = dashSessionId;
+              dashBypassLeft--;
+              dashObstacleCount++;
+            }
+          } else {
+            gameOver = true;
+          }
+        }
+      }
+
+      for (const b of groundBlocks) {
+        b.x -= sceneSpeed + 0.4;
+        if (!b.passed && b.x + b.w < bird.x) {
+          b.passed = true;
+          score++;
+        }
+        if (rectHit(birdRect, b)) {
+          if (dashBypassLeft > 0) {
+            if (b.dashSessionId !== dashSessionId) {
+              b.dashSessionId = dashSessionId;
+              dashBypassLeft--;
+              dashObstacleCount++;
+            }
+          } else {
+            gameOver = true;
+          }
+        }
+      }
+
+      for (const s of stars) {
+        s.x -= sceneSpeed * 0.9;
+        const starRect = { x: s.x - s.r, y: s.y - s.r, w: s.r * 2, h: s.r * 2 };
+        if (!s.got && rectHit(birdRect, starRect)) {
+          s.got = true;
+          score += 2;
+        }
+      }
+
+      while (pipes.length && pipes[0].x + pipes[0].w < -25) pipes.shift();
+      while (groundBlocks.length && groundBlocks[0].x + groundBlocks[0].w < -25) groundBlocks.shift();
+      while (stars.length && (stars[0].x < -40 || stars[0].got)) stars.shift();
+      if (dashBypassLeft <= 0) dashBypassLeft = 0;
+    }
+
+    function drawScene() {
+      ctx.clearRect(0, 0, WORLD.width, WORLD.height);
+
+      const theme = bgTheme || BG_THEMES[0];
+      const sky = ctx.createLinearGradient(0, 0, 0, WORLD.groundY);
+      sky.addColorStop(0, theme.skyTop);
+      sky.addColorStop(1, theme.skyBottom);
+      ctx.fillStyle = sky;
+      ctx.fillRect(0, 0, WORLD.width, WORLD.groundY);
+
+      // 日/月
+      ctx.fillStyle = theme.sun;
+      ctx.beginPath();
+      ctx.arc(WORLD.width - 110, 85, 34, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 远山
+      ctx.fillStyle = theme.mountainFar;
+      ctx.beginPath();
+      ctx.moveTo(0, WORLD.groundY);
+      for (let x = 0; x <= WORLD.width; x += 70) {
+        const y = WORLD.groundY - 45 - Math.sin((x + frame * 0.4) * 0.015) * 15;
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(WORLD.width, WORLD.groundY);
+      ctx.closePath();
+      ctx.fill();
+
+      // 近山
+      ctx.fillStyle = theme.mountainNear;
+      ctx.beginPath();
+      ctx.moveTo(0, WORLD.groundY);
+      for (let x = 0; x <= WORLD.width; x += 60) {
+        const y = WORLD.groundY - 28 - Math.sin((x + frame * 0.8) * 0.02) * 11;
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(WORLD.width, WORLD.groundY);
+      ctx.closePath();
+      ctx.fill();
+
+      // 国风点缀：竹影+亭台剪影
+      ctx.fillStyle = theme.deco;
+      for (let i = 0; i < 5; i++) {
+        const bx = 80 + i * 62 - (frame * 0.18 % 40);
+        ctx.fillRect(bx, WORLD.groundY - 86, 4, 86);
+        ctx.fillRect(bx + 7, WORLD.groundY - 74, 3, 74);
+      }
+      ctx.fillRect(WORLD.width - 220, WORLD.groundY - 34, 120, 6);
+      ctx.fillRect(WORLD.width - 190, WORLD.groundY - 74, 60, 40);
+      ctx.fillRect(WORLD.width - 200, WORLD.groundY - 78, 80, 4);
+
+      ctx.fillStyle = "rgba(255,255,255,0.75)";
+      for (let i = 0; i < 6; i++) {
+        const x = (frame * 0.4 + i * 190) % (WORLD.width + 140) - 120;
+        const y = 46 + (i % 3) * 35;
+        ctx.fillRect(x, y, 86, 22);
+      }
+
+      for (const p of pipes) drawPipe(p);
+      for (const b of groundBlocks) drawBlock(b);
+      for (const s of stars) drawStar(s);
+      drawBird();
+
+      ctx.fillStyle = theme.ground;
+      ctx.fillRect(0, WORLD.groundY, WORLD.width, WORLD.height - WORLD.groundY);
+      ctx.fillStyle = theme.groundStripe;
+      for (let i = 0; i < 20; i++) {
+        const x = ((i * 60 - frame * (speed + 1.2)) % (WORLD.width + 60)) - 60;
+        ctx.fillRect(x, WORLD.groundY + 42, 36, 6);
+      }
+
+      ctx.fillStyle = "#17324d";
+      ctx.font = "bold 25px Arial";
+      ctx.fillText("Score: " + score, 24, 36);
+      ctx.font = "bold 19px Arial";
+      ctx.fillText("Mode: " + (mode === MODE.FLY ? "FLY" : "RUN"), 24, 64);
+      const dashText = dashCooldown > 0 ? Math.ceil(dashCooldown / 60) + "s" : "READY";
+      ctx.fillText("Dash: " + dashText, 24, 90);
+      if (dashBypassLeft > 0) {
+        ctx.fillText("Bypass Left: " + dashBypassLeft + "/50", 24, 116);
+      }
+      ctx.fillText("Theme: " + theme.name, 24, 142);
+
+      if (gameOver) {
+        ctx.fillStyle = "rgba(0,0,0,0.45)";
+        ctx.fillRect(0, 0, WORLD.width, WORLD.height);
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 44px Arial";
+        ctx.fillText("Game Over", WORLD.width / 2 - 130, WORLD.height / 2 - 28);
+        ctx.font = "23px Arial";
+        ctx.fillText("按 R 或点击复原按钮重开", WORLD.width / 2 - 125, WORLD.height / 2 + 18);
+        ctx.fillText("本局弹射穿越障碍: " + dashObstacleCount, WORLD.width / 2 - 118, WORLD.height / 2 + 52);
+      }
+    }
+
+    function update() {
+      if (gameOver) return;
+      updatePlayer();
+      updateObstacles();
+    }
+
+    function loop() {
+      update();
+      drawScene();
+      requestAnimationFrame(loop);
+    }
+
+    function bindTouchButton(btn, key) {
+      if (!btn || !key) return;
+      const down = (e) => {
+        e.preventDefault();
+        keys.add(key);
+        if (key === "ArrowUp") doActionUp();
+        if (key === "ArrowDown" && mode === MODE.RUN) triggerDash();
+      };
+      const up = (e) => { e.preventDefault(); keys.delete(key); };
+      btn.addEventListener("pointerdown", down);
+      btn.addEventListener("pointerup", up);
+      btn.addEventListener("pointercancel", up);
+      btn.addEventListener("pointerleave", up);
+    }
+
+    for (const btn of document.querySelectorAll(".btn[data-key]")) {
+      bindTouchButton(btn, btn.dataset.key);
+    }
+
+    document.getElementById("resetBtn").addEventListener("click", () => reset());
+    document.getElementById("modeBtn").addEventListener("click", () => {
+      setMode(mode === MODE.FLY ? MODE.RUN : MODE.FLY);
+    });
+    document.getElementById("dashBtn").addEventListener("click", () => triggerDash());
+
+    window.addEventListener("keydown", (e) => {
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(e.key)) e.preventDefault();
+      keys.add(e.key);
+      if (e.key === " " || e.key === "ArrowUp") doActionUp();
+      if (e.key === "x" || e.key === "X") triggerDash();
+      if (e.key === "r" || e.key === "R") reset();
+      if (e.key === "m" || e.key === "M") setMode(mode === MODE.FLY ? MODE.RUN : MODE.FLY);
+    }, { passive: false });
+    window.addEventListener("keyup", (e) => keys.delete(e.key));
+
+    setMode(MODE.RUN);
+    loop();
+  </script>
+</body>
+</html>
