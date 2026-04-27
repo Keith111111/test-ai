@@ -129,6 +129,8 @@
     const BASE_H = 520;
     const canvas = document.getElementById("game");
     const ctx = canvas.getContext("2d");
+    let renderScaleX = 1;
+    let renderScaleY = 1;
 
     function resizeCanvas() {
       const controls = document.getElementById("controlsPanel");
@@ -148,7 +150,9 @@
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       canvas.width = Math.floor(cssW * dpr);
       canvas.height = Math.floor(cssH * dpr);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      renderScaleX = cssW / BASE_W;
+      renderScaleY = cssH / BASE_H;
+      ctx.setTransform(dpr * renderScaleX, 0, 0, dpr * renderScaleY, 0, 0);
     }
     window.addEventListener("resize", () => requestAnimationFrame(resizeCanvas));
     requestAnimationFrame(resizeCanvas);
